@@ -131,6 +131,9 @@ class TelegramSender:
         """Send a single Telegram message with exponential backoff retry (Fixes #287)"""
         # Convert Markdown to Telegram-compatible format
         telegram_text = text if markdown_converted else self._convert_to_telegram_markdown(text)
+        # Plain-text fallback: an already-converted chunk still carries Telegram
+        # markup (`\\[`, `*bold*`) that would be shown verbatim without parse_mode.
+        plain_text = self._strip_telegram_markdown(text) if markdown_converted else text
 
         payload = {
             "chat_id": chat_id,
@@ -168,7 +171,7 @@ class TelegramSender:
 
                     # If Markdown parsing failed, fall back to plain text
                     if self._should_fallback_to_plain_text(error_desc=error_desc):
-                        if self._send_plain_text_fallback(api_url, payload, text, timeout_seconds=timeout_seconds):
+                        if self._send_plain_text_fallback(api_url, payload, plain_text, timeout_seconds=timeout_seconds):
                             return True
 
                     return False
@@ -191,7 +194,7 @@ class TelegramSender:
                     time.sleep(delay)
                     continue
                 if self._should_fallback_to_plain_text(response_text=response.text):
-                    if self._send_plain_text_fallback(api_url, payload, text, timeout_seconds=timeout_seconds):
+                    if self._send_plain_text_fallback(api_url, payload, plain_text, timeout_seconds=timeout_seconds):
                         return True
                 logger.error(f"Telegram 请求失败: HTTP {response.status_code}")
                 logger.error(f"响应内容: {response.text}")
@@ -299,6 +302,11 @@ class TelegramSender:
             chunks: list[str] = []
             while utf16_len(section) > limit:
                 cut = max(1, _custom_unit_to_index(section, limit, utf16_len))
+                # Prefer a line boundary so a chunk never ends inside a bullet or a
+                # *bold* span (which breaks Markdown parsing for that chunk).
+                newline_cut = section.rfind("\n", 0, cut)
+                if newline_cut > 0:
+                    cut = newline_cut + 1
                 chunks.append(section[:cut])
                 section = section[cut:]
             chunks.append(section)
@@ -365,6 +373,12 @@ class TelegramSender:
             logger.error("Telegram 图片发送异常: %s", e)
             return False
 
+    @staticmethod
+    def _strip_telegram_markdown(text: str) -> str:
+        """Remove Telegram legacy-Markdown markup from an already-converted chunk."""
+        result = re.sub(r'(?<![\w*])\*([^*\n]+)\*(?![\w*])', r'\1', text)
+        return re.sub(r'\\([_*`\[])', r'\1', result)
+
     def _convert_to_telegram_markdown(self, text: str) -> str:
         """
         将标准 Markdown 转换为 Telegram 支持的格式
@@ -392,9 +406,11 @@ class TelegramSender:
             return f"{_link_placeholder}{len(_links) - 1}"
         result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _save_link, result)
 
-        # Step 2: escape remaining special chars
-        for char in ['[', ']', '(', ')']:
-            result = result.replace(char, f'\\{char}')
+        # Step 2: escape remaining special chars.
+        # Legacy Markdown only honours backslash escapes for `_ * ` [`; escaping
+        # `]`, `(` or `)` would show a literal backslash to the reader, and those
+        # characters cannot open an entity on their own.
+        result = result.replace('[', '\\[')
 
         # Step 3: restore links
         for i, link in enumerate(_links):

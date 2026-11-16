@@ -1300,6 +1300,14 @@ def get_signal_level(advice: Any, score: Any, language: Optional[str]) -> tuple[
 def get_localized_stock_name(value: Any, code: Any, language: Optional[str]) -> str:
     """Return a localized stock name placeholder when the original name is missing."""
     raw_text = str(value or "").strip()
+    if normalize_report_language(language) != "zh" and re.search(r"[\u4e00-\u9fff]", raw_text):
+        # Known US indices carry a Chinese name in the symbol mapping; non-Chinese
+        # reports should show the English name instead of leaking it through.
+        from data_provider.us_index_mapping import get_us_index_english_name
+
+        english_name = get_us_index_english_name(str(code or ""))
+        if english_name:
+            return english_name
     if not _is_placeholder_stock_name(raw_text, code):
         return raw_text
     return _GENERIC_STOCK_NAME_BY_LANGUAGE[normalize_report_language(language)]

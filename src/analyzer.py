@@ -1483,6 +1483,19 @@ def _apply_hold_watch_dashboard(
     position_advice["no_position"] = no_position
     position_advice["has_position"] = has_position
 
+    # 结论已降为观望时，作战计划里的建仓方案只能作为“确认后的条件计划”，
+    # 否则会出现“先别追买”与“开盘建仓 X 成”同时出现的自相矛盾。
+    battle_plan = dashboard.get("battle_plan")
+    position_strategy = battle_plan.get("position_strategy") if isinstance(battle_plan, dict) else None
+    if isinstance(position_strategy, dict):
+        if language == "zh":
+            watch_note = "当前观望，暂不建仓；以下仅为确认信号出现后的条件计划"
+        else:
+            watch_note = "Watch-only: no new position now; the plan below applies only after confirmation"
+        suggested = str(position_strategy.get("suggested_position") or "").strip()
+        if watch_note not in suggested:
+            position_strategy["suggested_position"] = f"{watch_note} — {suggested}" if suggested else watch_note
+
     stability = {
         "applied": True,
         "reason": reason,
@@ -4274,7 +4287,7 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
                 result = self._parse_response(response_text, code, name)
                 result.raw_response = response_text
                 result.search_performed = bool(news_context)
-                result.market_snapshot = self._build_market_snapshot(context)
+                result.market_snapshot = self._build_market_snapshot(context, report_language)
                 result.model_used = model_used
                 result.report_language = report_language
                 normalize_chip_structure_availability(result, context.get("chip"))
@@ -5187,7 +5200,7 @@ Output the complete Decision Dashboard in JSON format."""
         except (TypeError, ValueError):
             return 'N/A'
 
-    def _build_market_snapshot(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_market_snapshot(self, context: Dict[str, Any], report_language: str = "zh") -> Dict[str, Any]:
         """构建当日行情快照（展示用）"""
         today = context.get('today', {}) or {}
         realtime = context.get('realtime', {}) or {}
@@ -5211,6 +5224,17 @@ Output the complete Decision Dashboard in JSON format."""
             except (TypeError, ValueError):
                 change_amount = None
 
+        # 涨跌幅与同一行展示的收盘/昨收/涨跌额保持同一口径：能推导时一律由
+        # close 与 prev_close 推导，避免实时/兜底行情的 change_pct 基准不同而自相矛盾。
+        pct_chg = today.get('pct_chg')
+        if change_amount is not None:
+            try:
+                prev_close_value = float(prev_close)
+                if prev_close_value > 0:
+                    pct_chg = change_amount / prev_close_value * 100
+            except (TypeError, ValueError):
+                pass
+
         snapshot = {
             "date": context.get('date', '未知'),
             "close": self._format_price(close),
@@ -5218,17 +5242,17 @@ Output the complete Decision Dashboard in JSON format."""
             "high": self._format_price(high),
             "low": self._format_price(low),
             "prev_close": self._format_price(prev_close),
-            "pct_chg": self._format_percent(today.get('pct_chg')),
+            "pct_chg": self._format_percent(pct_chg),
             "change_amount": self._format_price(change_amount),
             "amplitude": self._format_percent(amplitude),
-            "volume": self._format_volume(today.get('volume')),
-            "amount": self._format_amount(today.get('amount')),
+            "volume": self._format_volume(today.get('volume'), report_language),
+            "amount": self._format_amount(today.get('amount'), report_language),
         }
 
         if realtime:
             snapshot.update({
                 "price": self._format_price(realtime.get('price')),
-                "volume_ratio": realtime.get('volume_ratio', 'N/A'),
+                "volume_ratio": realtime.get('volume_ratio') if realtime.get('volume_ratio') is not None else 'N/A',
                 "turnover_rate": self._format_percent(realtime.get('turnover_rate')),
                 "source": getattr(realtime.get('source'), 'value', realtime.get('source', 'N/A')),
             })

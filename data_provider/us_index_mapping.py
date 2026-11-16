@@ -42,6 +42,22 @@ US_INDEX_MAPPING = {
     '^RUT': ('^RUT', '罗素2000指数'),
 }
 
+# Yahoo Finance 符号 -> 英文名称（非中文报告展示用）
+US_INDEX_ENGLISH_NAMES = {
+    '^GSPC': 'S&P 500 Index',
+    '^DJI': 'Dow Jones Industrial Average',
+    '^IXIC': 'Nasdaq Composite',
+    '^NDX': 'Nasdaq 100',
+    '^VIX': 'CBOE Volatility Index (VIX)',
+    '^RUT': 'Russell 2000',
+}
+
+
+def get_us_index_english_name(code: str):
+    """Return the English display name for a known US index code, else None."""
+    yf_symbol, _ = US_INDEX_MAPPING.get((code or '').strip().upper(), (None, None))
+    return US_INDEX_ENGLISH_NAMES.get(yf_symbol) if yf_symbol else None
+
 
 def is_us_index_code(code: str) -> bool:
     """

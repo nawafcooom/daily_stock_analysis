@@ -104,7 +104,7 @@
 
 {% set vol_data = data_persp.get('volume_analysis', {}) %}
 {% if vol_data %}
-**{{ labels.volume_label }}**: {{ labels.volume_ratio_label }} {{ vol_data.get('volume_ratio', 'N/A') }} ({{ vol_data.get('volume_status', '') }}) | {{ labels.turnover_rate_label }} {{ vol_data.get('turnover_rate', 'N/A') }}%
+**{{ labels.volume_label }}**: {% set _vr = vol_data.get('volume_ratio') %}{% set _tr = vol_data.get('turnover_rate') %}{{ labels.volume_ratio_label }} {{ _vr if _vr is not none and _vr|string|lower not in ['', 'none', 'null', 'nan'] else 'N/A' }} ({{ vol_data.get('volume_status', '') }}) | {{ labels.turnover_rate_label }} {% if _tr is not none and _tr|string|lower not in ['', 'none', 'null', 'nan', 'n/a'] %}{{ _tr }}{% if not _tr|string|trim|last == '%' %}%{% endif %}{% else %}N/A{% endif %}
 💡 *{{ vol_data.get('volume_meaning', '') }}*
 {% endif %}
 
